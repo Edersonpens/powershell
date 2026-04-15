@@ -1,4 +1,9 @@
 # ================================
+# TLS (compatibilidade)
+# ================================
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# ================================
 # AUTO ELEVAÇÃO (ADMIN)
 # ================================
 if (-not ([Security.Principal.WindowsPrincipal] `
@@ -11,7 +16,21 @@ if (-not ([Security.Principal.WindowsPrincipal] `
 }
 
 # ================================
-# FUNÇÃO LOG
+# CONFIG LOG DE ERRO
+# ================================
+$data = Get-Date -Format "ddMMyyyy"
+$desktop = [Environment]::GetFolderPath("Desktop")
+$logErro = "$desktop\logerro_$data.txt"
+
+function Write-ErrorLog {
+    param ($msg)
+
+    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$time - ERRO - $msg" | Out-File -Append -FilePath $logErro
+}
+
+# ================================
+# FUNÇÃO LOG NORMAL
 # ================================
 function Write-Log {
     param ($msg)
@@ -24,27 +43,35 @@ function Write-Log {
 # ================================
 function Ensure-Winget {
 
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Log "Winget já está instalado."
-        return
+    try {
+        if (Get-Command winget -ErrorAction Stop) {
+            Write-Log "Winget já está instalado."
+            return
+        }
     }
+    catch {
+        Write-Log "Winget não encontrado. Instalando..."
 
-    Write-Log "Winget não encontrado. Instalando App Installer..."
+        try {
+            $url = "https://aka.ms/getwinget"
+            $file = "$env:TEMP\winget.appxbundle"
 
-    $url = "https://aka.ms/getwinget"
-    $file = "$env:TEMP\winget.appxbundle"
+            Invoke-WebRequest $url -OutFile $file -ErrorAction Stop
+            Add-AppxPackage -Path $file -ErrorAction Stop
 
-    Invoke-WebRequest $url -OutFile $file
+            Start-Sleep -Seconds 5
 
-    Add-AppxPackage -Path $file
-
-    Start-Sleep -Seconds 5
-
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Log "Winget instalado com sucesso."
-    } else {
-        Write-Log "Falha ao instalar Winget. Verifique manualmente."
-        exit
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                Write-Log "Winget instalado com sucesso."
+            } else {
+                throw "Falha ao validar Winget após instalação."
+            }
+        }
+        catch {
+            Write-ErrorLog "Erro ao instalar Winget: $($_.Exception.Message)"
+            Write-Host "Erro ao instalar Winget. Verifique o log no Desktop."
+            exit
+        }
     }
 }
 
@@ -62,23 +89,29 @@ function Show-Progress {
 function Install-Or-Update {
     param ($Name, $Id)
 
-    Show-Progress "Instalação de programas" "Processando $Name..." 0
+    try {
+        Show-Progress "Instalação de programas" "Processando $Name..." 0
 
-    winget install -e --id $Id `
-    --accept-package-agreements `
-    --accept-source-agreements `
-    --silent | Out-Null
+        winget install -e --id $Id `
+        --accept-package-agreements `
+        --accept-source-agreements `
+        --silent -ErrorAction Stop | Out-Null
 
-    Show-Progress "Instalação de programas" "$Name instalado/verificado" 50
+        Show-Progress "Instalação de programas" "$Name instalado/verificado" 50
 
-    winget upgrade -e --id $Id `
-    --accept-package-agreements `
-    --accept-source-agreements `
-    --silent | Out-Null
+        winget upgrade -e --id $Id `
+        --accept-package-agreements `
+        --accept-source-agreements `
+        --silent -ErrorAction Stop | Out-Null
 
-    Show-Progress "Instalação de programas" "$Name atualizado" 100
+        Show-Progress "Instalação de programas" "$Name atualizado" 100
 
-    Write-Log "$Name finalizado."
+        Write-Log "$Name finalizado."
+    }
+    catch {
+        Write-ErrorLog "Erro em $Name: $($_.Exception.Message)"
+        Write-Host "Erro ao processar $Name. Verifique o log."
+    }
 }
 
 # ================================
@@ -102,4 +135,6 @@ Show-Progress "Instalação de programas" "Finalizando..." 100
 Write-Progress -Activity "Instalação de programas" -Completed
 
 Write-Log "===== FINALIZADO ====="
-Write-Host "Tudo concluído com sucesso!"
+
+Write-Host "`nTudo concluído!"
+Write-Host "Se houve erro, veja: $logErro"
