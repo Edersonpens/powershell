@@ -1,22 +1,10 @@
 # ================================
-# TLS (compatibilidade)
+# TLS
 # ================================
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # ================================
-# AUTO ELEVAÇÃO (ADMIN)
-# ================================
-if (-not ([Security.Principal.WindowsPrincipal] `
-[Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(`
-[Security.Principal.WindowsBuiltInRole]::Administrator)) {
-
-    Write-Host "Reiniciando como administrador..."
-    Start-Process powershell "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-    exit
-}
-
-# ================================
-# CONFIG LOG DE ERRO (NOVO)
+# LOG
 # ================================
 $dataHora = Get-Date -Format "ddMMyyyy_HHmmss"
 $desktop = [Environment]::GetFolderPath("Desktop")
@@ -28,112 +16,86 @@ function Write-ErrorLog {
     "$time - ERRO - $msg" | Out-File -Append -FilePath $logErro
 }
 
-# ================================
-# LOG NORMAL
-# ================================
-function Write-Log {
+function Write-HostLog {
     param ($msg)
-    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Write-Host "$time - $msg"
+    Write-Host $msg
 }
 
 # ================================
-# VERIFICA / INSTALA WINGET
+# TENTA INSTALAR WINGET
 # ================================
-function Ensure-Winget {
+function Try-Install-Winget {
+
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        return $true
+    }
 
     try {
-        if (Get-Command winget -ErrorAction Stop) {
-            Write-Log "Winget já está instalado."
-            return
-        }
+        $file = "$env:TEMP\winget.appxbundle"
+        Invoke-WebRequest "https://aka.ms/getwinget" -OutFile $file -ErrorAction Stop
+        Add-AppxPackage -Path $file -ErrorAction Stop
+
+        Start-Sleep 5
+
+        return (Get-Command winget -ErrorAction SilentlyContinue)
     }
     catch {
-        Write-Log "Winget não encontrado. Instalando..."
-
-        try {
-            $url = "https://aka.ms/getwinget"
-            $file = "$env:TEMP\winget.appxbundle"
-
-            Invoke-WebRequest $url -OutFile $file -ErrorAction Stop
-            Add-AppxPackage -Path $file -ErrorAction Stop
-
-            Start-Sleep -Seconds 5
-
-            if (Get-Command winget -ErrorAction SilentlyContinue) {
-                Write-Log "Winget instalado com sucesso."
-            } else {
-                throw "Falha ao validar Winget após instalação."
-            }
-        }
-        catch {
-            Write-ErrorLog "Erro ao instalar Winget: $($_.Exception.Message)"
-            Write-Host "Erro ao instalar Winget. Verifique o log no Desktop."
-            exit
-        }
+        Write-ErrorLog "Falha ao instalar Winget: $($_.Exception.Message)"
+        return $false
     }
 }
 
 # ================================
-# BARRA DE PROGRESSO
+# INSTALAÇÃO MANUAL (FALLBACK)
 # ================================
-function Show-Progress {
-    param ($Activity, $Status, $Percent)
-    Write-Progress -Activity $Activity -Status $Status -PercentComplete $Percent
-}
+function Install-Manual {
 
-# ================================
-# INSTALAR / ATUALIZAR
-# ================================
-function Install-Or-Update {
-    param ($Name, $Id)
+    Write-HostLog "Instalação manual iniciada..."
 
     try {
-        Show-Progress "Instalação de programas" "Processando $Name..." 0
+        $temp = "$env:TEMP\apps"
+        New-Item -ItemType Directory -Path $temp -Force | Out-Null
 
-        winget install -e --id $Id `
-        --accept-package-agreements `
-        --accept-source-agreements `
-        --silent -ErrorAction Stop | Out-Null
+        # 7-Zip
+        $zip = "$temp\7zip.exe"
+        Invoke-WebRequest "https://www.7-zip.org/a/7z2301-x64.exe" -OutFile $zip
+        Start-Process $zip -ArgumentList "/S" -Wait
 
-        Show-Progress "Instalação de programas" "$Name instalado/verificado" 50
+        # Notepad++
+        $npp = "$temp\npp.exe"
+        Invoke-WebRequest "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/latest/download/npp.x64.Installer.exe" -OutFile $npp
+        Start-Process $npp -ArgumentList "/S" -Wait
 
-        winget upgrade -e --id $Id `
-        --accept-package-agreements `
-        --accept-source-agreements `
-        --silent -ErrorAction Stop | Out-Null
+        # Chrome
+        $chrome = "$temp\chrome.exe"
+        Invoke-WebRequest "https://dl.google.com/chrome/install/latest/chrome/install_chrome.exe" -OutFile $chrome
+        Start-Process $chrome -ArgumentList "/silent /install" -Wait
 
-        Show-Progress "Instalação de programas" "$Name atualizado" 100
-
-        Write-Log "$Name finalizado."
+        Write-HostLog "Instalação manual concluída."
     }
     catch {
-        Write-ErrorLog "Erro em ${Name}: $($_.Exception.Message)"
-        Write-Host "Erro ao processar $Name. Verifique o log."
+        Write-ErrorLog "Erro na instalação manual: $($_.Exception.Message)"
     }
 }
 
 # ================================
 # EXECUÇÃO
 # ================================
-Write-Log "===== INÍCIO ====="
+Write-Host "Iniciando..."
 
-Ensure-Winget
+$wingetOK = Try-Install-Winget
 
-Show-Progress "Instalação de programas" "Iniciando..." 5
+if ($wingetOK) {
+    Write-Host "Winget OK, usando instalação automática..."
 
-Install-Or-Update "7-Zip" "7zip.7zip"
-Show-Progress "Instalação de programas" "Indo para próximo..." 30
+    winget install -e --id 7zip.7zip --silent
+    winget install -e --id Notepad++.Notepad++ --silent
+    winget install -e --id Google.Chrome --silent
+}
+else {
+    Write-Host "Winget falhou, usando modo manual..."
+    Install-Manual
+}
 
-Install-Or-Update "Notepad++" "Notepad++.Notepad++"
-Show-Progress "Instalação de programas" "Indo para próximo..." 60
-
-Install-Or-Update "Google Chrome" "Google.Chrome"
-Show-Progress "Instalação de programas" "Finalizando..." 100
-
-Write-Progress -Activity "Instalação de programas" -Completed
-
-Write-Log "===== FINALIZADO ====="
-
-Write-Host "`nTudo concluído!"
-Write-Host "Se houve erro, veja: $logErro"
+Write-Host "Finalizado!"
+Write-Host "Log de erro: $logErro"
