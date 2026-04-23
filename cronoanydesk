@@ -1,0 +1,76 @@
+# ================================================
+# Script PowerShell: Reset Timer AnyDesk
+# Remove cronômetro / aviso de licença mantendo conexões recentes
+# Execute como Administrador!
+# ================================================
+
+# Verifica se está rodando como Administrador
+if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "❌ Este script precisa ser executado como Administrador!" -ForegroundColor Red
+    Write-Host "Clique com botão direito no PowerShell → Executar como administrador" -ForegroundColor Yellow
+    pause
+    exit
+}
+
+Write-Host "🔄 Iniciando reset do timer do AnyDesk..." -ForegroundColor Cyan
+
+# Caminhos principais do AnyDesk
+$programData = "C:\ProgramData\AnyDesk"
+$appData     = "$env:APPDATA\AnyDesk"
+
+# 1. Para todos os processos AnyDesk (incluindo o serviço)
+Write-Host "🛑 Parando processos do AnyDesk..." -ForegroundColor Yellow
+
+Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+# Para o serviço AnyDesk (caso esteja rodando como serviço)
+Stop-Service -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
+
+# Aguarda um pouco para garantir que tudo parou
+Start-Sleep -Seconds 2
+
+# 2. Remove apenas os arquivos responsáveis pelo timer (principalmente service.conf)
+Write-Host "🗑️  Removendo arquivos de configuração do timer..." -ForegroundColor Yellow
+
+# Arquivos mais importantes para resetar o cronômetro
+$filesToDelete = @(
+    "$programData\service.conf",
+    "$appData\service.conf",
+    "$programData\system.conf",   # às vezes ajuda
+    "$appData\system.conf"
+)
+
+foreach ($file in $filesToDelete) {
+    if (Test-Path $file) {
+        Remove-Item $file -Force -ErrorAction SilentlyContinue
+        Write-Host "   ✅ Deletado: $file" -ForegroundColor Green
+    }
+}
+
+# 3. (Opcional) Remove thumbnails e caches pequenos (não afeta conexões)
+$thumbPath = "$appData\thumbnails"
+if (Test-Path $thumbPath) {
+    Remove-Item "$thumbPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "`n✅ Reset do timer concluído!" -ForegroundColor Green
+Write-Host "   O AnyDesk vai gerar novos arquivos de configuração ao reiniciar." -ForegroundColor Green
+Write-Host "`n▶️  Iniciando o AnyDesk novamente..." -ForegroundColor Cyan
+
+# 4. Reinicia o AnyDesk
+$anydeskPath = "C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
+if (-not (Test-Path $anydeskPath)) {
+    $anydeskPath = "C:\Program Files\AnyDesk\AnyDesk.exe"
+}
+
+if (Test-Path $anydeskPath) {
+    Start-Process $anydeskPath
+    Write-Host "   AnyDesk iniciado com sucesso!" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  AnyDesk.exe não encontrado no caminho padrão. Abra manualmente." -ForegroundColor Yellow
+}
+
+Write-Host "`nPronto! O cronômetro deve ter sido resetado." -ForegroundColor Magenta
+Write-Host "Dica: Se o timer voltar, rode o script novamente." -ForegroundColor Gray
+
+pause
