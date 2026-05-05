@@ -1,0 +1,54 @@
+# ================================
+# Instalando RustDesk
+# ================================
+
+# CONFIG
+$VERSION = "1.4.5"
+$URL = "https://github.com/rustdesk/rustdesk/releases/download/1.4.5/rustdesk-1.4.5-x86_64.msi"
+$SERVER = "rustdesk.telecon.cloud"
+$KEY = "IDd2wWqnXdH5mU84odLnNIB6bzFNjYm0ArN3xqjQqOE="
+
+# TEMP
+$TEMP_DIR = "$env:TEMP\rustdesk_install"
+New-Item -ItemType Directory -Path $TEMP_DIR -Force | Out-Null
+Set-Location $TEMP_DIR
+
+Write-Host "Baixando..."
+try {
+    Invoke-WebRequest -Uri $URL -OutFile "rustdesk.msi"
+} catch {
+    Write-Host "ERRO no download"
+    pause
+    exit
+}
+
+if (!(Test-Path "rustdesk.msi")) {
+    Write-Host "ERRO no download"
+    pause
+    exit
+}
+
+Write-Host "Instalando silenciosamente..."
+Start-Process "msiexec.exe" -ArgumentList "/i rustdesk.msi /qn /norestart /l*v `"$TEMP_DIR\install.log`"" -Wait
+
+Start-Sleep -Seconds 10
+
+Write-Host "Configurando servidor personalizado..."
+Start-Sleep -Seconds 5
+
+# CONFIG STRING
+$CONFIG_STRING = "host=$SERVER,key=$KEY"
+
+$rustdeskPath = "C:\Program Files\RustDesk\rustdesk.exe"
+
+if (Test-Path $rustdeskPath) {
+    & $rustdeskPath --config "$CONFIG_STRING"
+} else {
+    Write-Host "RustDesk não encontrado em $rustdeskPath"
+}
+
+Write-Host "================================"
+Write-Host "FINALIZADO - RustDesk configurado!"
+Write-Host "================================"
+
+pause
