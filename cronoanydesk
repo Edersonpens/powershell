@@ -1,76 +1,105 @@
-# ================================================
-# Script PowerShell: Reset Timer AnyDesk
-# Remove cronômetro / aviso de licença mantendo conexões recentes
-# Execute como Administrador!
-# ================================================
+# =============================================
+# Script: Reset AnyDesk Contador/Timer - Versão 3 (Corrigida)
+# =============================================
 
-# Verifica se está rodando como Administrador
-if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "❌ Este script precisa ser executado como Administrador!" -ForegroundColor Red
-    Write-Host "Clique com botão direito no PowerShell → Executar como administrador" -ForegroundColor Yellow
-    pause
-    exit
-}
-
-Write-Host "🔄 Iniciando reset do timer do AnyDesk..." -ForegroundColor Cyan
-
-# Caminhos principais do AnyDesk
-$programData = "C:\ProgramData\AnyDesk"
-$appData     = "$env:APPDATA\AnyDesk"
-
-# 1. Para todos os processos AnyDesk (incluindo o serviço)
-Write-Host "🛑 Parando processos do AnyDesk..." -ForegroundColor Yellow
-
-Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-
-# Para o serviço AnyDesk (caso esteja rodando como serviço)
-Stop-Service -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
-
-# Aguarda um pouco para garantir que tudo parou
-Start-Sleep -Seconds 2
-
-# 2. Remove apenas os arquivos responsáveis pelo timer (principalmente service.conf)
-Write-Host "🗑️  Removendo arquivos de configuração do timer..." -ForegroundColor Yellow
-
-# Arquivos mais importantes para resetar o cronômetro
-$filesToDelete = @(
-    "$programData\service.conf",
-    "$appData\service.conf",
-    "$programData\system.conf",   # às vezes ajuda
-    "$appData\system.conf"
+param(
+    [switch]$KeepID = $true
 )
 
-foreach ($file in $filesToDelete) {
-    if (Test-Path $file) {
-        Remove-Item $file -Force -ErrorAction SilentlyContinue
-        Write-Host "   ✅ Deletado: $file" -ForegroundColor Green
+function Test-Admin {
+    $currentUser = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+if (-not (Test-Admin)) {
+    Write-Host "ERRO: Execute como Administrador!" -ForegroundColor Red
+    pause; exit 1
+}
+
+Write-Host "Iniciando reset do contador AnyDesk..." -ForegroundColor Green
+
+# Caminhos
+$anydeskExe     = "C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
+$programData    = "C:\ProgramData\AnyDesk"
+$appData        = "$env:APPDATA\AnyDesk"
+
+# Parar AnyDesk
+Write-Host "Parando AnyDesk..." -ForegroundColor Yellow
+Get-Process -Name "AnyDesk*" -ErrorAction SilentlyContinue | Stop-Process -Force
+Stop-Service -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 3
+
+# Backup do histórico do usuário
+$backupPath = "$env:TEMP\AnyDesk_Backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+
+$filesToBackup = @("user.conf", "thumbnails")
+
+Write-Host "Fazendo backup do historico..." -ForegroundColor Cyan
+foreach ($item in $filesToBackup) {
+    $source = Join-Path $appData $item
+    if (Test-Path $source) {
+        Copy-Item -Path $source -Destination $backupPath -Recurse -Force
     }
 }
 
-# 3. (Opcional) Remove thumbnails e caches pequenos (não afeta conexões)
-$thumbPath = "$appData\thumbnails"
-if (Test-Path $thumbPath) {
-    Remove-Item "$thumbPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+# Reset do contador
+Write-Host "Resetando arquivos do contador..." -ForegroundColor Yellow
+
+$filesToReset = @("connection_trace.txt", "ad.trace", "ad_svc.trace")
+
+if (Test-Path $programData) {
+    foreach ($file in $filesToReset) {
+        Remove-Item "$programData\$file" -Force -ErrorAction SilentlyContinue
+    }
+    
+    # Tratamento para service.conf e system.conf
+    if ($KeepID) {
+        $confFiles = @("service.conf", "system.conf")
+        foreach ($conf in $confFiles) {
+            $fullPath = "$programData\$conf"
+            $bakPath  = "$programData\$conf.bak"
+            
+            if (Test-Path $fullPath) {
+                if (Test-Path $bakPath) {
+                    Remove-Item $bakPath -Force
+                }
+                Rename-Item $fullPath "$conf.bak" -Force
+                Write-Host " $conf renomeado para backup" -ForegroundColor Green
+            }
+        }
+    } else {
+        Remove-Item "$programData\service.conf" -Force -ErrorAction SilentlyContinue
+        Remove-Item "$programData\system.conf" -Force -ErrorAction SilentlyContinue
+    }
 }
 
-Write-Host "`n✅ Reset do timer concluído!" -ForegroundColor Green
-Write-Host "   O AnyDesk vai gerar novos arquivos de configuração ao reiniciar." -ForegroundColor Green
-Write-Host "`n▶️  Iniciando o AnyDesk novamente..." -ForegroundColor Cyan
-
-# 4. Reinicia o AnyDesk
-$anydeskPath = "C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
-if (-not (Test-Path $anydeskPath)) {
-    $anydeskPath = "C:\Program Files\AnyDesk\AnyDesk.exe"
+# Reset no AppData
+if (Test-Path $appData) {
+    foreach ($file in $filesToReset) {
+        Remove-Item "$appData\$file" -Force -ErrorAction SilentlyContinue
+    }
 }
 
-if (Test-Path $anydeskPath) {
-    Start-Process $anydeskPath
-    Write-Host "   AnyDesk iniciado com sucesso!" -ForegroundColor Green
+# Restaurar histórico
+Write-Host "Restaurando historico e nomes renomeados..." -ForegroundColor Cyan
+foreach ($item in $filesToBackup) {
+    $source = Join-Path $backupPath $item
+    $dest   = Join-Path $appData $item
+    if (Test-Path $source) {
+        Copy-Item -Path $source -Destination $dest -Recurse -Force
+    }
+}
+
+# Iniciar AnyDesk
+Write-Host "Iniciando AnyDesk..." -ForegroundColor Green
+if (Test-Path $anydeskExe) {
+    Start-Process -FilePath $anydeskExe
+    Write-Host "AnyDesk iniciado!" -ForegroundColor Green
 } else {
-    Write-Host "⚠️  AnyDesk.exe não encontrado no caminho padrão. Abra manualmente." -ForegroundColor Yellow
+    Write-Host "AnyDesk.exe nao encontrado!" -ForegroundColor Yellow
 }
 
-Write-Host "`nPronto! O cronômetro deve ter sido resetado." -ForegroundColor Magenta
-Write-Host "Dica: Se o timer voltar, rode o script novamente." -ForegroundColor Gray
-
+Write-Host "Reset concluido com sucesso!" -ForegroundColor Green
+Write-Host "Backup temporario: $backupPath" -ForegroundColor Gray
 pause
