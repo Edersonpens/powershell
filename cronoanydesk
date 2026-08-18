@@ -1,105 +1,26 @@
-# =============================================
-# Script: Reset AnyDesk Contador/Timer - Versão 3 (Corrigida)
-# =============================================
-
-param(
-    [switch]$KeepID = $true
-)
-
-function Test-Admin {
-    $currentUser = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+# Requer privilégios de Administrador
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Warning "Este script precisa ser executado como Administrador!"
+    Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    exit
 }
 
-if (-not (Test-Admin)) {
-    Write-Host "ERRO: Execute como Administrador!" -ForegroundColor Red
-    pause; exit 1
-}
-
-Write-Host "Iniciando reset do contador AnyDesk..." -ForegroundColor Green
-
-# Caminhos
-$anydeskExe     = "C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
-$programData    = "C:\ProgramData\AnyDesk"
-$appData        = "$env:APPDATA\AnyDesk"
-
-# Parar AnyDesk
-Write-Host "Parando AnyDesk..." -ForegroundColor Yellow
-Get-Process -Name "AnyDesk*" -ErrorAction SilentlyContinue | Stop-Process -Force
+Write-Host "[1/3] Encerrando processos e serviços do AnyDesk..." -ForegroundColor Cyan
+Stop-Process -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
 Stop-Service -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 3
 
-# Backup do histórico do usuário
-$backupPath = "$env:TEMP\AnyDesk_Backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
+Write-Host "[2/3] Apagando arquivos de registro do contador e ID..." -ForegroundColor Cyan
+$serviceConf = "$env:ProgramData\AnyDesk\service.conf"
 
-$filesToBackup = @("user.conf", "thumbnails")
-
-Write-Host "Fazendo backup do historico..." -ForegroundColor Cyan
-foreach ($item in $filesToBackup) {
-    $source = Join-Path $appData $item
-    if (Test-Path $source) {
-        Copy-Item -Path $source -Destination $backupPath -Recurse -Force
-    }
-}
-
-# Reset do contador
-Write-Host "Resetando arquivos do contador..." -ForegroundColor Yellow
-
-$filesToReset = @("connection_trace.txt", "ad.trace", "ad_svc.trace")
-
-if (Test-Path $programData) {
-    foreach ($file in $filesToReset) {
-        Remove-Item "$programData\$file" -Force -ErrorAction SilentlyContinue
-    }
-    
-    # Tratamento para service.conf e system.conf
-    if ($KeepID) {
-        $confFiles = @("service.conf", "system.conf")
-        foreach ($conf in $confFiles) {
-            $fullPath = "$programData\$conf"
-            $bakPath  = "$programData\$conf.bak"
-            
-            if (Test-Path $fullPath) {
-                if (Test-Path $bakPath) {
-                    Remove-Item $bakPath -Force
-                }
-                Rename-Item $fullPath "$conf.bak" -Force
-                Write-Host " $conf renomeado para backup" -ForegroundColor Green
-            }
-        }
-    } else {
-        Remove-Item "$programData\service.conf" -Force -ErrorAction SilentlyContinue
-        Remove-Item "$programData\system.conf" -Force -ErrorAction SilentlyContinue
-    }
-}
-
-# Reset no AppData
-if (Test-Path $appData) {
-    foreach ($file in $filesToReset) {
-        Remove-Item "$appData\$file" -Force -ErrorAction SilentlyContinue
-    }
-}
-
-# Restaurar histórico
-Write-Host "Restaurando historico e nomes renomeados..." -ForegroundColor Cyan
-foreach ($item in $filesToBackup) {
-    $source = Join-Path $backupPath $item
-    $dest   = Join-Path $appData $item
-    if (Test-Path $source) {
-        Copy-Item -Path $source -Destination $dest -Recurse -Force
-    }
-}
-
-# Iniciar AnyDesk
-Write-Host "Iniciando AnyDesk..." -ForegroundColor Green
-if (Test-Path $anydeskExe) {
-    Start-Process -FilePath $anydeskExe
-    Write-Host "AnyDesk iniciado!" -ForegroundColor Green
+if (Test-Path $serviceConf) {
+    Remove-Item -Path $serviceConf -Force
+    Write-Host "Arquivo 'service.conf' removido com sucesso." -ForegroundColor Green
 } else {
-    Write-Host "AnyDesk.exe nao encontrado!" -ForegroundColor Yellow
+    Write-Host "Arquivo 'service.conf' nao encontrado." -ForegroundColor Yellow
 }
 
-Write-Host "Reset concluido com sucesso!" -ForegroundColor Green
-Write-Host "Backup temporario: $backupPath" -ForegroundColor Gray
-pause
+Write-Host "[3/3] Reiniciando o serviço do AnyDesk..." -ForegroundColor Cyan
+Start-Service -Name "AnyDesk" -ErrorAction SilentlyContinue
+
+Write-Host "`nProcesso concluido! O AnyDesk gerou um novo ID sem a limitação comercial." -ForegroundColor Green
+Write-Host "O histórico de acessos e IDs recentes foram mantidos em %AppData%\AnyDesk." -ForegroundColor Green
