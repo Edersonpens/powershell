@@ -1,29 +1,51 @@
 # ================================
-# Instalando RustDesk
+# Instalando RustDesk (versão dinâmica)
 # ================================
 
 # CONFIG
-$VERSION = "1.4.5"
-$URL = "https://github.com/rustdesk/rustdesk/releases/download/1.4.5/rustdesk-1.4.5-x86_64.msi"
 $SERVER = "rustdesk.telecon.cloud"
 $KEY = "IDd2wWqnXdH5mU84odLnNIB6bzFNjYm0ArN3xqjQqOE="
+
+# --- OBTÉM A ÚLTIMA VERSÃO DO GITHUB ---
+Write-Host "Buscando a versão mais recente do RustDesk..."
+try {
+    $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/rustdesk/rustdesk/releases/latest" -UseBasicParsing
+    $LATEST_VERSION = $releaseInfo.tag_name -replace '^v' -replace '^V'  # remove 'v' ou 'V' se existir
+} catch {
+    Write-Host "ERRO: Não foi possível obter a versão mais recente do GitHub."
+    Write-Host $_.Exception.Message
+    pause
+    exit
+}
+
+if ([string]::IsNullOrWhiteSpace($LATEST_VERSION)) {
+    Write-Host "ERRO: A versão retornada pela API está vazia."
+    pause
+    exit
+}
+
+Write-Host "Versão mais recente encontrada: $LATEST_VERSION"
+
+# Monta a URL do MSI para a versão encontrada
+$URL = "https://github.com/rustdesk/rustdesk/releases/download/$LATEST_VERSION/rustdesk-$LATEST_VERSION-x86_64.msi"
 
 # TEMP
 $TEMP_DIR = "$env:TEMP\rustdesk_install"
 New-Item -ItemType Directory -Path $TEMP_DIR -Force | Out-Null
 Set-Location $TEMP_DIR
 
-Write-Host "Baixando..."
+Write-Host "Baixando RustDesk $LATEST_VERSION..."
 try {
-    Invoke-WebRequest -Uri $URL -OutFile "rustdesk.msi"
+    Invoke-WebRequest -Uri $URL -OutFile "rustdesk.msi" -UseBasicParsing
 } catch {
-    Write-Host "ERRO no download"
+    Write-Host "ERRO no download. Verifique se o asset existe para esta versão."
+    Write-Host $_.Exception.Message
     pause
     exit
 }
 
 if (!(Test-Path "rustdesk.msi")) {
-    Write-Host "ERRO no download"
+    Write-Host "ERRO: O arquivo rustdesk.msi não foi encontrado após o download."
     pause
     exit
 }
@@ -48,7 +70,7 @@ if (Test-Path $rustdeskPath) {
 }
 
 Write-Host "================================"
-Write-Host "FINALIZADO - RustDesk configurado!"
+Write-Host "FINALIZADO - RustDesk $LATEST_VERSION configurado!"
 Write-Host "================================"
 
 pause
