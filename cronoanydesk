@@ -1,26 +1,85 @@
-# Requer privilégios de Administrador
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Warning "Este script precisa ser executado como Administrador!"
-    Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+
+# =====================================================
+# ANYDESK - MANUTENCAO E PRESERVACAO
+# Autor: Ederson Pens
+# =====================================================
+
+$ErrorActionPreference = "Stop"
+
+# Verificar administrador
+$admin = ([Security.Principal.WindowsPrincipal]`
+    [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator
+)
+
+if (-not $admin) {
+    Start-Process powershell.exe -Verb RunAs -ArgumentList `
+        "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
     exit
 }
 
-Write-Host "[1/3] Encerrando processos e serviços do AnyDesk..." -ForegroundColor Cyan
-Stop-Process -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
-Stop-Service -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
+Write-Host "`n=== ANYDESK MANUTENCAO ===" -ForegroundColor Cyan
 
-Write-Host "[2/3] Apagando arquivos de registro do contador e ID..." -ForegroundColor Cyan
-$serviceConf = "$env:ProgramData\AnyDesk\service.conf"
+# Localizar diretorios
+$paths = @(
+    "$env:ProgramData\AnyDesk",
+    "$env:APPDATA\AnyDesk",
+    "$env:LOCALAPPDATA\AnyDesk"
+)
 
-if (Test-Path $serviceConf) {
-    Remove-Item -Path $serviceConf -Force
-    Write-Host "Arquivo 'service.conf' removido com sucesso." -ForegroundColor Green
-} else {
-    Write-Host "Arquivo 'service.conf' nao encontrado." -ForegroundColor Yellow
+# Backup
+$backup = "$env:USERPROFILE\Desktop\Backup_AnyDesk_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+
+New-Item -ItemType Directory -Path $backup -Force | Out-Null
+
+Write-Host "[1/4] Preservando configuracoes..." -ForegroundColor Cyan
+
+foreach ($path in $paths) {
+    if (Test-Path $path) {
+        $name = Split-Path $path -Leaf
+        Copy-Item $path "$backup\$name" -Recurse -Force
+        Write-Host "Backup realizado: $path" -ForegroundColor Green
+    }
 }
 
-Write-Host "[3/3] Reiniciando o serviço do AnyDesk..." -ForegroundColor Cyan
-Start-Service -Name "AnyDesk" -ErrorAction SilentlyContinue
+# Localizar servico
+Write-Host "[2/4] Verificando servico..." -ForegroundColor Cyan
 
-Write-Host "`nProcesso concluido! O AnyDesk gerou um novo ID sem a limitação comercial." -ForegroundColor Green
-Write-Host "O histórico de acessos e IDs recentes foram mantidos em %AppData%\AnyDesk." -ForegroundColor Green
+$service = Get-Service -Name "AnyDesk" -ErrorAction SilentlyContinue
+
+if (-not $service) {
+    Write-Warning "Servico AnyDesk nao encontrado."
+    Write-Host "Verifique se o AnyDesk esta instalado."
+    exit
+}
+
+# Encerrar processo
+Write-Host "[3/4] Reiniciando AnyDesk..." -ForegroundColor Cyan
+
+Stop-Process -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
+
+if ($service.Status -ne "Stopped") {
+    Stop-Service -Name "AnyDesk" -Force
+}
+
+Start-Sleep -Seconds 3
+
+Start-Service -Name "AnyDesk"
+
+# Validar
+Write-Host "[4/4] Validando funcionamento..." -ForegroundColor Cyan
+
+Start-Sleep -Seconds 5
+
+$service = Get-Service -Name "AnyDesk"
+
+if ($service.Status -eq "Running") {
+    Write-Host "`nSERVICO FUNCIONANDO!" -ForegroundColor Green
+} else {
+    Write-Warning "O servico nao iniciou corretamente."
+}
+
+Write-Host "`nBackup salvo em:" -ForegroundColor Yellow
+Write-Host $backup
+
+Write-Host "`nManutencao concluida." -ForegroundColor Green
